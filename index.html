@@ -1861,7 +1861,7 @@ window.__createDemo=function(){
       if(!sec||!me||data.name!==me.name)throw err('permission-denied');
       const m=s.methods||{};
       if(data.method==='key'){ if(!m.key||data.proof!==sec.key)throw err('permission-denied'); }
-      else if(data.method==='qr'){ if(!m.qr||Date.now()>sec.qrAt+45000||(data.proof!==sec.qr&&data.proof!==sec.qrPrev))throw err('permission-denied'); }
+      else if(data.method==='qr'){ if(!m.qr||Date.now()>sec.qrAt+60000||(data.proof!==sec.qr&&data.proof!==sec.qrPrev))throw err('permission-denied'); }
       else throw err('permission-denied');
     }else if(p[0]==='lecturers'){
       if(op!=='read'&&!isLect(db,u))throw err('permission-denied');
@@ -2022,7 +2022,10 @@ function errText(e){
    'auth/invalid-credential':'errCred','auth/wrong-password':'errCred','auth/user-not-found':'errCred','auth/invalid-login-credentials':'errCred',
    'auth/network-request-failed':'errNet','unavailable':'errNet','auth/too-many-requests':'errMany','permission-denied':'errPerm',
    'closed':'errClosed','wrong':'errBad'};
-  return m[c]?t(m[c]):(t('errGen')+(c?' ('+c+')':''));
+  const raw=e&&e.raw;const rc=raw&&raw.code?' ['+raw.code+']':'';
+  if(m[c])return t(m[c])+rc;
+  const msg=String((e&&e.message)||'').replace(/^Firebase:\s*/,'').slice(0,90);
+  return t('errGen')+(c||msg?' ('+(c||'')+(c&&msg?': ':'')+msg+')':'');
 }
 function flash(kind,text){S.flash={kind:kind,text:text};paintFlash();clearTimeout(flash.t);flash.t=setTimeout(function(){S.flash=null;paintFlash();},5000);}
 function paintFlash(){const el=$('flash');if(!el)return;if(!S.flash){el.hidden=true;el.textContent='';return;}el.hidden=false;el.className='flash '+S.flash.kind;el.textContent=S.flash.text;}
@@ -2232,7 +2235,7 @@ async function writeSecret(){
 async function rotateQr(){
   if(!S.secret||!S.ses||S.ses.status!=='open'||!(S.ses.methods&&S.ses.methods.qr))return;
   S.secret={key:S.secret.key,qr:rnd(10),qrPrev:S.secret.qr};S.lastRot=Date.now();
-  try{await writeSecret();}catch(e){}
+  try{await writeSecret();}catch(e){if(!S.rotWarned){S.rotWarned=true;flash('bad',errText(e));}}
   paintQr();
 }
 function tick(){
@@ -2389,10 +2392,9 @@ async function doAttend(sid,method,proof){
     if(ex){S.done[sid]=true;S.result={ses:ses,already:true};S.view='attend';stopScan();render();return;}
     const p=S.profile;
     try{
-      await B.batch([
-       {op:'set',path:'sessions/'+sid+'/attendance/'+uid,data:{uid:uid,name:p.name,email:p.email,studentId:p.studentId||'',method:method,proof:proof,at:B.TS}},
-       {op:'set',merge:true,path:'users/'+uid+'/courses/'+(ses.courseKey||ckeyOf(ses.level,ses.course)),data:{course:ses.course,level:ses.level,count:B.inc(1),last:ses.date,lastAt:B.TS}}]);
-    }catch(e){ if(e&&e.code==='permission-denied')throw {code:'wrong'}; throw e; }
+      await B.set('sessions/'+sid+'/attendance/'+uid,{uid:uid,name:p.name||'',email:p.email||'',studentId:p.studentId||'',method:method,proof:String(proof),at:B.TS});
+    }catch(e){ if(e&&e.code==='permission-denied')throw {code:'wrong',raw:e}; throw e; }
+    try{B.set('users/'+uid+'/courses/'+(ses.courseKey||ckeyOf(ses.level,ses.course)),{course:ses.course||'',level:ses.level||'',count:B.inc(1),last:ses.date||'',lastAt:B.TS},true).catch(function(){});}catch(e){}
     S.done[sid]=true;S.result={ses:ses,already:false};S.view='attend';stopScan();render();
   }catch(e){
     flash('bad',errText(e));
